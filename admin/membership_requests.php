@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 require_once "../config/database.php";
@@ -30,87 +31,113 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $errors[] = "Invalid request details.";
         } else {
 
-            $stmt = $conn->prepare(
-                "SELECT id, client_id, plan_name, status
-                 FROM membership_requests
-                 WHERE id = ?"
-            );
-            $stmt->execute([$request_id]);
-            $request = $stmt->fetch();
+            try {
+                $conn->beginTransaction();
 
-            if (!$request || $request["status"] !== "Pending") {
-                $errors[] = "Request not found or already processed.";
-            } else {
-
-                try {
-                    $conn->beginTransaction();
-
-                $update = $conn->prepare(
-                "UPDATE membership_requests
-                SET status = ?
-                WHERE id = ? AND status = 'Pending'"
+                $stmt = $conn->prepare(
+                    "SELECT mr.id, mr.client_id, mr.plan_name, mr.status,
+                            p.amount, p.payment_method, p.status AS payment_status
+                     FROM membership_requests mr
+                     LEFT JOIN payments p ON p.request_id = mr.id
+                     WHERE mr.id = ?
+                     FOR UPDATE"
                 );
 
-$update->execute([$status, $request_id]);
+                $stmt->execute([$request_id]);
+                $request = $stmt->fetch();
 
-if ($update->rowCount() !== 1) {
-    throw new Exception("This request has already been processed.");
-}
-
-                    if ($status === "Approved") {
-
-                        $plan_durations = [
-                            "Monthly" => 1,
-                            "Quarterly" => 3,
-                            "Half Yearly" => 6,
-                            "Yearly" => 12
-                        ];
-
-                        $months = $plan_durations[$request["plan_name"]] ?? null;
-
-                        if (!$months) {
-                            throw new Exception("Invalid membership plan.");
-                        }
-
-                        $start_date = date("Y-m-d");
-                        $end_date = date(
-                            "Y-m-d",
-                            strtotime("+$months months", strtotime($start_date))
-                        );
-
-                        $insert = $conn->prepare(
-                            "INSERT INTO memberships
-                             (client_id, plan_name, start_date, end_date, amount, payment_status)
-                             VALUES (?, ?, ?, ?, 0.00, 'Pending')"
-                        );
-
-                        $insert->execute([
-                            $request["client_id"],
-                            $request["plan_name"],
-                            $start_date,
-                            $end_date
-                        ]);
-                    }
-
-                    $conn->commit();
-                    $success = "Membership request " . strtolower($status) . " successfully.";
-
-                } catch (Throwable $e) {
-                    if ($conn->inTransaction()) {
-                        $conn->rollBack();
-                    }
-
-                    $errors[] = "Unable to process the request: " . $e->getMessage();
+                if (!$request || $request["status"] !== "Pending") {
+                    throw new Exception("Request not found or already processed.");
                 }
+
+                if ($status === "Approved") {
+
+                    if ($request["payment_status"] !== "Success") {
+                        throw new Exception("Cannot approve a request without successful payment.");
+                    }
+
+                    $plan_durations = [
+                        "Monthly" => 1,
+                        "Quarterly" => 3,
+                        "Half Yearly" => 6,
+                        "Yearly" => 12
+                    ];
+
+                    $months = $plan_durations[$request["plan_name"]] ?? null;
+
+                    if (!$months) {
+                        throw new Exception("Invalid membership plan.");
+                    }
+
+                    $amount = (float) $request["amount"];
+
+                    if ($amount <= 0) {
+                        throw new Exception("Invalid payment amount.");
+                    }
+
+                    $start_date = date("Y-m-d");
+
+                    $end_date = date(
+                        "Y-m-d",
+                        strtotime("+$months months", strtotime($start_date))
+                    );
+
+                    $insert = $conn->prepare(
+                        "INSERT INTO memberships
+                         (client_id, plan_name, start_date, end_date,
+                          amount, payment_status)
+                         VALUES (?, ?, ?, ?, ?, 'Paid')"
+                    );
+
+                    $insert->execute([
+                        $request["client_id"],
+                        $request["plan_name"],
+                        $start_date,
+                        $end_date,
+                        $amount
+                    ]);
+                }
+
+                $update = $conn->prepare(
+                    "UPDATE membership_requests
+                     SET status = ?
+                     WHERE id = ? AND status = 'Pending'"
+                );
+
+                $update->execute([$status, $request_id]);
+
+                if ($update->rowCount() !== 1) {
+                    throw new Exception("This request has already been processed.");
+                }
+
+                $conn->commit();
+
+                $success = "Membership request " . strtolower($status) . " successfully.";
+
+            } catch (Throwable $e) {
+
+                if ($conn->inTransaction()) {
+                    $conn->rollBack();
+                }
+
+                $errors[] = $e->getMessage();
             }
         }
     }
 }
 
 $stmt = $conn->query(
-    "SELECT mr.*, c.name AS client_name, c.email, c.phone
+    "SELECT mr.*,
+            c.name AS client_name,
+            c.email,
+            c.phone,
+            p.amount,
+            p.payment_method,
+            p.transaction_id,
+            p.status AS payment_status
      FROM membership_requests mr
      JOIN clients c ON mr.client_id = c.id
+     LEFT JOIN payments p ON p.request_id = mr.id
      ORDER BY
         CASE WHEN mr.status = 'Pending' THEN 0 ELSE 1 END,
         mr.requested_at DESC"
@@ -124,13 +151,14 @@ $requests = $stmt->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Membership Requests | Smart Gym</title>
 
     <link rel="stylesheet" href="../assets/css/style.css">
 
     <style>
         .page-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 40px auto;
             padding: 20px;
         }
@@ -149,7 +177,7 @@ $requests = $stmt->fetchAll();
         table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 900px;
+            min-width: 1200px;
         }
 
         th, td {
@@ -163,9 +191,19 @@ $requests = $stmt->fetchAll();
             color: white;
         }
 
-        .status-pending { color: #ffc107; }
-        .status-approved { color: #65d68a; }
-        .status-rejected { color: #ff7777; }
+        .status-pending {
+            color: #ffc107;
+        }
+
+        .status-approved,
+        .status-success {
+            color: #65d68a;
+        }
+
+        .status-rejected,
+        .status-failed {
+            color: #ff7777;
+        }
 
         .action-form {
             display: flex;
@@ -180,8 +218,13 @@ $requests = $stmt->fetchAll();
             cursor: pointer;
         }
 
-        .approve { background: #198754; }
-        .reject { background: #dc3545; }
+        .approve {
+            background: #198754;
+        }
+
+        .reject {
+            background: #dc3545;
+        }
 
         .message {
             padding: 12px;
@@ -190,8 +233,13 @@ $requests = $stmt->fetchAll();
             border-radius: 5px;
         }
 
-        .success { color: #65d68a; }
-        .error { color: #ff7777; }
+        .success {
+            color: #65d68a;
+        }
+
+        .error {
+            color: #ff7777;
+        }
     </style>
 </head>
 
@@ -216,6 +264,7 @@ $requests = $stmt->fetchAll();
     <?php endif; ?>
 
     <div class="table-container">
+
         <table>
             <thead>
                 <tr>
@@ -223,38 +272,74 @@ $requests = $stmt->fetchAll();
                     <th>Email</th>
                     <th>Phone</th>
                     <th>Plan</th>
+                    <th>Amount</th>
+                    <th>Payment Method</th>
+                    <th>Payment Status</th>
+                    <th>Transaction ID</th>
                     <th>Message</th>
                     <th>Requested Date</th>
-                    <th>Status</th>
+                    <th>Request Status</th>
                     <th>Action</th>
                 </tr>
             </thead>
 
             <tbody>
+
                 <?php if (empty($requests)): ?>
+
                     <tr>
-                        <td colspan="8">No membership requests found.</td>
+                        <td colspan="12">No membership requests found.</td>
                     </tr>
+
                 <?php else: ?>
 
                     <?php foreach ($requests as $request): ?>
+
                         <tr>
                             <td><?= htmlspecialchars($request["client_name"]) ?></td>
+
                             <td><?= htmlspecialchars($request["email"]) ?></td>
+
                             <td><?= htmlspecialchars($request["phone"]) ?></td>
+
                             <td><?= htmlspecialchars($request["plan_name"]) ?></td>
-                            <td><?= htmlspecialchars($request["message"] ?? "-") ?></td>
-                            <td><?= htmlspecialchars($request["requested_at"]) ?></td>
 
                             <td>
-                                <span class="status-<?= strtolower($request["status"]) ?>">
-                                    <?= htmlspecialchars($request["status"]) ?>
-                                </span>
+                                <?= $request["amount"] !== null
+                                    ? "₹" . number_format((float)$request["amount"], 2)
+                                    : "-" ?>
                             </td>
 
                             <td>
+                                <?= htmlspecialchars($request["payment_method"] ?? "-") ?>
+                            </td>
+
+                            <td class="status-<?= strtolower($request["payment_status"] ?? "failed") ?>">
+                                <?= htmlspecialchars($request["payment_status"] ?? "Not Paid") ?>
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($request["transaction_id"] ?? "-") ?>
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($request["message"] ?? "-") ?>
+                            </td>
+
+                            <td>
+                                <?= htmlspecialchars($request["requested_at"]) ?>
+                            </td>
+
+                            <td class="status-<?= strtolower($request["status"]) ?>">
+                                <?= htmlspecialchars($request["status"]) ?>
+                            </td>
+
+                            <td>
+
                                 <?php if ($request["status"] === "Pending"): ?>
+
                                     <form method="POST" class="action-form">
+
                                         <input
                                             type="hidden"
                                             name="csrf_token"
@@ -272,7 +357,7 @@ $requests = $stmt->fetchAll();
                                             name="status"
                                             value="Approved"
                                             class="approve"
-                                            onclick="return confirm('Approve this membership request?')"
+                                            onclick="return confirm('Approve this paid membership request?')"
                                         >
                                             Approve
                                         </button>
@@ -286,17 +371,25 @@ $requests = $stmt->fetchAll();
                                         >
                                             Reject
                                         </button>
+
                                     </form>
+
                                 <?php else: ?>
+
                                     -
+
                                 <?php endif; ?>
+
                             </td>
                         </tr>
+
                     <?php endforeach; ?>
 
                 <?php endif; ?>
+
             </tbody>
         </table>
+
     </div>
 
     <p style="margin-top:20px;">
