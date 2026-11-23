@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 
@@ -57,8 +58,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["assign_membership"]))
         $amount = $_POST["amount"] ?? "";
         $payment_status = $_POST["payment_status"] ?? "";
 
-        if (!$client_id) {
-            $errors[] = "Please select a client.";
+        if (!$client_id || $client_id < 1) {
+            $errors[] = "Please select a valid client.";
         }
 
         $allowed_plans = [
@@ -87,13 +88,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["assign_membership"]))
 
         if (
             !is_numeric($amount) ||
+            !is_finite((float)$amount) ||
             (float)$amount < 0 ||
             (float)$amount > 99999999.99
         ) {
             $errors[] = "Enter a valid membership amount.";
         }
 
-        if (!in_array($payment_status, ["Paid", "Pending"], true)) {
+        if (!in_array($payment_status, $allowed_statuses, true)) {
             $errors[] = "Select a valid payment status.";
         }
 
@@ -143,7 +145,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["delete_membership"]))
             FILTER_VALIDATE_INT
         );
 
-        if (!$membership_id) {
+        if (!$membership_id || $membership_id < 1) {
             $errors[] = "Invalid membership selected.";
         } else {
 
@@ -199,7 +201,6 @@ if ($search !== "") {
 
 // Filter by payment status
 if ($filter_status !== "") {
-
     $sql .= " AND m.payment_status = ?";
     $params[] = $filter_status;
 }
@@ -231,7 +232,9 @@ $memberships = $stmt->fetchAll();
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
@@ -240,6 +243,7 @@ $memberships = $stmt->fetchAll();
     <link rel="stylesheet" href="../assets/css/style.css">
 
     <style>
+
         .container {
             padding: 50px 5%;
             min-height: 85vh;
@@ -272,6 +276,7 @@ $memberships = $stmt->fetchAll();
             color: white;
             border: 1px solid #444;
             border-radius: 5px;
+            box-sizing: border-box;
         }
 
         .membership-form button {
@@ -285,7 +290,10 @@ $memberships = $stmt->fetchAll();
             cursor: pointer;
         }
 
-        .membership-form button:hover {
+        .membership-form button:hover,
+        .filter-form button:hover,
+        .delete-btn:hover,
+        .request-btn:hover {
             background: #c1121f;
         }
 
@@ -358,10 +366,6 @@ $memberships = $stmt->fetchAll();
             font-weight: bold;
         }
 
-        .request-btn:hover {
-            background: #c1121f;
-        }
-
         .request-count {
             display: inline-block;
             background: #111;
@@ -380,6 +384,7 @@ $memberships = $stmt->fetchAll();
         }
 
         /* Status badges */
+
         .status-badge {
             display: inline-block;
             padding: 6px 12px;
@@ -414,6 +419,7 @@ $memberships = $stmt->fetchAll();
         }
 
         /* Search and filter */
+
         .filter-form {
             display: flex;
             gap: 10px;
@@ -453,15 +459,39 @@ $memberships = $stmt->fetchAll();
             text-decoration: none;
         }
 
-        .filter-form button:hover {
-            background: #c1121f;
+        @media (max-width: 600px) {
+
+            .container {
+                padding: 30px 4%;
+            }
+
+            .membership-form {
+                padding: 20px;
+            }
+
+            .filter-form {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-form input,
+            .filter-form select,
+            .filter-form button,
+            .reset-btn {
+                width: 100%;
+                box-sizing: border-box;
+            }
+
         }
+
     </style>
+
 </head>
 
 <body>
 
 <header class="navbar">
+
     <h2>SMART GYM ADMIN</h2>
 
     <nav>
@@ -470,93 +500,134 @@ $memberships = $stmt->fetchAll();
         <a href="memberships.php">Memberships</a>
         <a href="logout.php">Logout</a>
     </nav>
+
 </header>
 
 <main class="container">
 
-    <!-- Membership Requests Button -->
     <div style="margin: 20px 0;">
+
         <a href="membership_requests.php" class="request-btn">
+
             + Membership Requests
 
             <?php if ($pending_requests > 0): ?>
+
                 <span class="request-count">
                     <?= $pending_requests ?>
                 </span>
+
             <?php endif; ?>
+
         </a>
+
     </div>
 
     <h1>Membership Management</h1>
 
     <?php if (!empty($errors)): ?>
+
         <div class="message">
             <ul>
+
                 <?php foreach ($errors as $error): ?>
+
                     <li><?= htmlspecialchars($error) ?></li>
+
                 <?php endforeach; ?>
+
+            </ul>
         </div>
+
     <?php endif; ?>
 
     <?php if (($_GET["success"] ?? "") === "assigned"): ?>
+
         <div class="message success">
             Membership assigned successfully!
         </div>
+
     <?php elseif (($_GET["success"] ?? "") === "deleted"): ?>
+
         <div class="message success">
             Membership deleted successfully!
         </div>
+
     <?php elseif (($_GET["success"] ?? "") === "updated"): ?>
+
         <div class="message success">
             Membership updated successfully!
         </div>
+
     <?php endif; ?>
 
     <h2>Assign Membership</h2>
 
     <form method="POST" class="membership-form">
 
-        <input type="hidden" name="csrf_token"
-               value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>"
+        >
 
         <label>Select Client</label>
 
         <select name="client_id" required>
+
             <option value="">Choose Client</option>
 
             <?php foreach ($clients as $client): ?>
+
                 <option value="<?= (int)$client["id"] ?>">
+
                     <?= htmlspecialchars($client["name"]) ?>
                     (<?= htmlspecialchars($client["email"]) ?>)
+
                 </option>
+
             <?php endforeach; ?>
+
         </select>
 
         <label>Membership Plan</label>
 
         <select name="plan_name" required>
+
             <option value="">Choose Plan</option>
             <option value="Monthly">Monthly</option>
             <option value="Quarterly">Quarterly</option>
             <option value="Half Yearly">Half Yearly</option>
             <option value="Yearly">Yearly</option>
+
         </select>
 
         <label>Start Date</label>
+
         <input type="date" name="start_date" required>
 
         <label>Expiry Date</label>
+
         <input type="date" name="end_date" required>
 
         <label>Amount (₹)</label>
-        <input type="number" name="amount" min="0" max="99999999.99"
-               step="0.01" required>
+
+        <input
+            type="number"
+            name="amount"
+            min="0"
+            max="99999999.99"
+            step="0.01"
+            required
+        >
 
         <label>Payment Status</label>
 
         <select name="payment_status" required>
+
             <option value="Pending">Pending</option>
             <option value="Paid">Paid</option>
+
         </select>
 
         <button type="submit" name="assign_membership">
@@ -568,6 +639,7 @@ $memberships = $stmt->fetchAll();
     <h2>All Memberships</h2>
 
     <!-- Search and Filter -->
+
     <form method="GET" class="filter-form">
 
         <input
@@ -578,13 +650,40 @@ $memberships = $stmt->fetchAll();
         >
 
         <select name="status">
-            <option value="">All Payment Status</option>
-            <option value="Paid" <?= $filter_status === "Paid" ? "selected" : "" ?>>
+
+            <option value="">All Payment Statuses</option>
+
+            <option value="Paid"
+                <?= $filter_status === "Paid" ? "selected" : "" ?>>
                 Paid
             </option>
-            <option value="Pending" <?= $filter_status === "Pending" ? "selected" : "" ?>>
+
+            <option value="Pending"
+                <?= $filter_status === "Pending" ? "selected" : "" ?>>
                 Pending
             </option>
+
+        </select>
+
+        <select name="membership_status">
+
+            <option value="">All Membership Statuses</option>
+
+            <option value="Active"
+                <?= $filter_membership === "Active" ? "selected" : "" ?>>
+                Active
+            </option>
+
+            <option value="Expired"
+                <?= $filter_membership === "Expired" ? "selected" : "" ?>>
+                Expired
+            </option>
+
+            <option value="Upcoming"
+                <?= $filter_membership === "Upcoming" ? "selected" : "" ?>>
+                Upcoming
+            </option>
+
         </select>
 
         <button type="submit">Search</button>
@@ -596,7 +695,9 @@ $memberships = $stmt->fetchAll();
     <div class="table-container">
 
         <table>
+
             <thead>
+
                 <tr>
                     <th>ID</th>
                     <th>Client</th>
@@ -608,19 +709,23 @@ $memberships = $stmt->fetchAll();
                     <th>Membership Status</th>
                     <th>Action</th>
                 </tr>
+
             </thead>
 
             <tbody>
 
                 <?php if (empty($memberships)): ?>
+
                     <tr>
                         <td colspan="9">No memberships found.</td>
                     </tr>
+
                 <?php else: ?>
 
                     <?php foreach ($memberships as $membership): ?>
 
                         <?php
+
                         $today = date("Y-m-d");
 
                         if ($today < $membership["start_date"]) {
@@ -630,67 +735,103 @@ $memberships = $stmt->fetchAll();
                         } else {
                             $membership_status = "Active";
                         }
+
+                        $payment_status = $membership["payment_status"] ?? "Pending";
+
                         ?>
 
                         <tr>
-                            <td><?= (int)$membership["id"] ?></td>
 
                             <td>
+                                <?= (int)$membership["id"] ?>
+                            </td>
+
+                            <td>
+
                                 <?= htmlspecialchars($membership["client_name"]) ?>
+
                                 <br>
-                                <small><?= htmlspecialchars($membership["client_email"]) ?></small>
+
+                                <small>
+                                    <?= htmlspecialchars($membership["client_email"]) ?>
+                                </small>
+
                             </td>
 
                             <td>
                                 <?= htmlspecialchars($membership["plan_name"]) ?>
                             </td>
 
-                            <td><?= htmlspecialchars($membership["start_date"]) ?></td>
+                            <td>
+                                <?= htmlspecialchars($membership["start_date"]) ?>
+                            </td>
 
-                            <td><?= htmlspecialchars($membership["end_date"]) ?></td>
+                            <td>
+                                <?= htmlspecialchars($membership["end_date"]) ?>
+                            </td>
 
                             <td>
                                 ₹<?= number_format((float)$membership["amount"], 2) ?>
                             </td>
 
                             <td>
-                                <?php
-                                $payment_status = $membership["payment_status"] ?? "Pending";
-                                ?>
 
                                 <span class="status-badge status-<?= strtolower(htmlspecialchars($payment_status)) ?>">
+
                                     <?= htmlspecialchars($payment_status) ?>
+
                                 </span>
+
                             </td>
 
                             <td>
+
                                 <span class="status-badge status-<?= strtolower($membership_status) ?>">
+
                                     <?= htmlspecialchars($membership_status) ?>
+
                                 </span>
+
                             </td>
 
                             <td>
-                                <a href="edit_membership.php?id=<?= (int)$membership["id"] ?>"
-                                   class="edit-btn">
+
+                                <a
+                                    href="edit_membership.php?id=<?= (int)$membership["id"] ?>"
+                                    class="edit-btn"
+                                >
                                     Edit
                                 </a>
 
-                                <form method="POST"
-                                      onsubmit="return confirm('Delete this membership?');">
+                                <form
+                                    method="POST"
+                                    onsubmit="return confirm('Delete this membership?');"
+                                >
 
-                                    <input type="hidden" name="csrf_token"
-                                           value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                                    <input
+                                        type="hidden"
+                                        name="csrf_token"
+                                        value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>"
+                                    >
 
-                                    <input type="hidden" name="membership_id"
-                                           value="<?= (int)$membership["id"] ?>">
+                                    <input
+                                        type="hidden"
+                                        name="membership_id"
+                                        value="<?= (int)$membership["id"] ?>"
+                                    >
 
-                                    <button type="submit"
-                                            name="delete_membership"
-                                            class="delete-btn">
+                                    <button
+                                        type="submit"
+                                        name="delete_membership"
+                                        class="delete-btn"
+                                    >
                                         Delete
                                     </button>
+
                                 </form>
+
                             </td>
+
                         </tr>
 
                     <?php endforeach; ?>
@@ -698,6 +839,7 @@ $memberships = $stmt->fetchAll();
                 <?php endif; ?>
 
             </tbody>
+
         </table>
 
     </div>
