@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 require_once "../config/database.php";
@@ -75,14 +76,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
+// Fetch clients
 $clients = $conn->query(
     "SELECT id, name, email FROM clients ORDER BY name"
 )->fetchAll();
 
+// Fetch trainers
 $trainers = $conn->query(
     "SELECT id, name, specialization FROM trainers ORDER BY name"
 )->fetchAll();
 
+// Fetch assignments
 $assignments = $conn->query(
     "SELECT tc.id, c.name AS client_name, c.email,
             t.name AS trainer_name, t.specialization,
@@ -92,229 +96,571 @@ $assignments = $conn->query(
      JOIN trainers t ON tc.trainer_id = t.id
      ORDER BY tc.id DESC"
 )->fetchAll();
+
+function e($value) {
+    return htmlspecialchars((string)$value, ENT_QUOTES, "UTF-8");
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assign Clients | Smart Gym Admin</title>
 
-    <title>Assign Clients | Smart Gym</title>
+<link rel="stylesheet" href="../assets/css/style.css">
 
-    <link rel="stylesheet" href="../assets/css/style.css">
+<style>
+* {
+    box-sizing: border-box;
+}
 
-    <style>
-        .container {
-            padding: 50px 5%;
-            min-height: 85vh;
-        }
+body {
+    margin: 0;
+    background: #090909;
+    color: #f5f5f5;
+    font-family: Arial, Helvetica, sans-serif;
+}
 
-        h1, h2 {
-            color: #e63946;
-            margin-bottom: 25px;
-        }
+.admin-layout {
+    min-height: 100vh;
+}
 
-        .assignment-form {
-            max-width: 600px;
-            padding: 30px;
-            background: #1c1c1c;
-            border-radius: 10px;
-            margin-bottom: 45px;
-        }
+/* SIDEBAR */
+.admin-sidebar {
+    width: 250px;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1000;
+    background: rgba(10,10,10,.97);
+    border-right: 1px solid #242424;
+    padding: 28px 18px;
+    overflow-y: auto;
+}
 
-        .assignment-form label {
-            display: block;
-            margin: 15px 0 8px;
-        }
+.admin-brand {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    color: #fff;
+    margin: 0 0 35px;
+}
 
-        .assignment-form select {
-            width: 100%;
-            padding: 12px;
-            background: #111;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 5px;
-        }
+.admin-brand span {
+    color: #e63946;
+}
 
-        .assignment-form button {
-            width: 100%;
-            margin-top: 25px;
-            padding: 13px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
+.admin-sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
 
-        .table-container {
-            overflow-x: auto;
-            background: #1c1c1c;
-            border-radius: 8px;
-        }
+.admin-sidebar nav a {
+    display: block;
+    text-decoration: none;
+    color: #aaa;
+    padding: 13px 15px;
+    border-radius: 9px;
+    font-size: 14px;
+    transition: .2s;
+}
 
-        table {
-            width: 100%;
-            min-width: 750px;
-            border-collapse: collapse;
-        }
+.admin-sidebar nav a:hover,
+.admin-sidebar nav a.active {
+    background: rgba(230,57,70,.12);
+    color: #fff;
+    border-left: 3px solid #e63946;
+}
 
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #333;
-        }
+/* MAIN CONTENT */
+.admin-main {
+    margin-left: 250px;
+    min-height: 100vh;
+    padding: 35px 40px 110px;
+    background:
+        linear-gradient(rgba(5,5,5,.90), rgba(5,5,5,.94)),
+        url("../uploads/admin-bg.jpg") center/cover fixed;
+}
 
-        th {
-            background: #080808;
-            color: #e63946;
-        }
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+}
 
-        td {
-            color: #ddd;
-        }
+.topbar-label {
+    color: #888;
+    font-size: 13px;
+}
 
-        .delete-btn {
-            padding: 8px 12px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
+.topbar-label strong {
+    color: #eee;
+}
 
-        .message {
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            background: #442024;
-            color: #ffb3b8;
-        }
+.page-heading {
+    margin-bottom: 28px;
+}
 
-        .success {
-            background: #183c27;
-            color: #a8e6b8;
-        }
+.page-heading h1 {
+    font-size: 30px;
+    margin: 0 0 10px;
+    font-weight: 800;
+}
 
-        .back-link {
-            display: inline-block;
-            margin-top: 25px;
-            color: #e63946;
-            text-decoration: none;
-        }
-    </style>
+.page-heading p {
+    color: #929292;
+    font-size: 14px;
+    margin: 0;
+}
+
+/* ALERTS */
+.alert {
+    padding: 14px 17px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.alert-error {
+    background: rgba(230,57,70,.12);
+    border: 1px solid rgba(230,57,70,.3);
+    color: #ff9ca3;
+}
+
+.alert-success {
+    background: rgba(40,170,95,.12);
+    border: 1px solid rgba(40,170,95,.25);
+    color: #91e0ae;
+}
+
+/* PANELS */
+.panel {
+    background: rgba(19,19,19,.94);
+    border: 1px solid #292929;
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 28px;
+    box-shadow: 0 12px 35px rgba(0,0,0,.18);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 23px;
+}
+
+.panel-header h2 {
+    font-size: 19px;
+    margin: 0;
+}
+
+.panel-header p {
+    color: #888;
+    margin: 7px 0 0;
+    font-size: 13px;
+}
+
+/* ASSIGNMENT FORM */
+.assignment-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 20px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.form-group label {
+    color: #ccc;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 14px;
+    background: #101010;
+    border: 1px solid #333;
+    color: #fff;
+    border-radius: 9px;
+    outline: none;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.form-group select:focus {
+    border-color: #e63946;
+    box-shadow: 0 0 0 3px rgba(230,57,70,.10);
+}
+
+.form-group select option {
+    background: #151515;
+    color: #fff;
+}
+
+.primary-btn {
+    grid-column: 1 / -1;
+    border: 0;
+    background: #e63946;
+    color: #fff;
+    padding: 14px 20px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: .2s;
+}
+
+.primary-btn:hover {
+    background: #c92d3a;
+    transform: translateY(-1px);
+}
+
+/* ASSIGNMENT SUMMARY */
+.assignment-count {
+    display: inline-block;
+    padding: 7px 13px;
+    background: rgba(230,57,70,.12);
+    border: 1px solid rgba(230,57,70,.25);
+    color: #ff929a;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* TABLE */
+.table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #292929;
+    border-radius: 12px;
+}
+
+table {
+    width: 100%;
+    min-width: 800px;
+    border-collapse: collapse;
+}
+
+thead {
+    background: #111;
+}
+
+th {
+    padding: 16px;
+    text-align: left;
+    color: #e63946;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .7px;
+    white-space: nowrap;
+}
+
+td {
+    padding: 15px 16px;
+    color: #ddd;
+    font-size: 13px;
+    border-top: 1px solid #262626;
+}
+
+tbody tr {
+    transition: .2s;
+}
+
+tbody tr:hover {
+    background: rgba(255,255,255,.025);
+}
+
+.client-name,
+.trainer-name {
+    font-weight: 700;
+    color: #fff;
+}
+
+.specialization-badge {
+    display: inline-block;
+    padding: 6px 10px;
+    background: rgba(230,57,70,.10);
+    border: 1px solid rgba(230,57,70,.2);
+    border-radius: 20px;
+    color: #ff929a;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.remove-btn {
+    padding: 8px 13px;
+    background: rgba(230,57,70,.12);
+    border: 1px solid rgba(230,57,70,.25);
+    color: #ff737d;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .2s;
+}
+
+.remove-btn:hover {
+    background: #e63946;
+    color: #fff;
+}
+
+.empty-state {
+    text-align: center;
+    color: #777;
+    padding: 35px;
+}
+
+/* FOOTER */
+.admin-footer {
+    position: fixed;
+    bottom: 0;
+    left: 250px;
+    right: 0;
+    z-index: 100;
+    background: rgba(8,8,8,.96);
+    border-top: 1px solid #252525;
+    text-align: center;
+    padding: 15px;
+    color: #777;
+    font-size: 12px;
+}
+
+/* RESPONSIVE */
+@media(max-width: 1000px) {
+    .admin-sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        padding: 18px;
+        border-right: none;
+        border-bottom: 1px solid #252525;
+    }
+
+    .admin-brand {
+        margin-bottom: 15px;
+    }
+
+    .admin-sidebar nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .admin-sidebar nav a {
+        padding: 10px 12px;
+    }
+
+    .admin-main {
+        margin-left: 0;
+        padding: 25px 20px 110px;
+        background-attachment: scroll;
+    }
+
+    .admin-footer {
+        left: 0;
+    }
+}
+
+@media(max-width: 600px) {
+    .admin-main {
+        padding: 22px 13px 110px;
+    }
+
+    .page-heading h1 {
+        font-size: 24px;
+    }
+
+    .panel {
+        padding: 17px;
+    }
+
+    .assignment-form {
+        grid-template-columns: 1fr;
+    }
+
+    .primary-btn {
+        grid-column: auto;
+        width: 100%;
+    }
+
+    .panel-header h2 {
+        font-size: 17px;
+    }
+}
+</style>
 </head>
 
 <body>
 
-<header class="navbar">
-    <h2>SMART GYM ADMIN</h2>
+<div class="admin-layout">
+
+<!-- SIDEBAR -->
+<aside class="admin-sidebar">
+    <h2 class="admin-brand">SMART GYM <span>ADMIN</span></h2>
+
     <nav>
         <a href="dashboard.php">Dashboard</a>
         <a href="clients.php">Clients</a>
         <a href="memberships.php">Memberships</a>
         <a href="trainers.php">Trainers</a>
+        <a href="dietitians.php">Dietitians</a>
+        <a href="assign_clients.php" class="active">Assign Clients</a>
+        <a href="complaints.php">Complaints</a>
+        <a href="reports.php">Reports</a>
         <a href="logout.php">Logout</a>
     </nav>
-</header>
+</aside>
 
-<main class="container">
+<!-- MAIN -->
+<main class="admin-main">
 
-    <h1>Assign Clients to Trainers</h1>
-
-    <?php foreach ($errors as $error): ?>
-        <div class="message">
-            <?= htmlspecialchars($error) ?>
+    <div class="topbar">
+        <div class="topbar-label">
+            ADMIN PANEL / <strong>CLIENT ASSIGNMENTS</strong>
         </div>
+    </div>
+
+    <div class="page-heading">
+        <h1>Client Assignments</h1>
+        <p>Assign clients to trainers and manage existing assignments.</p>
+    </div>
+
+    <!-- MESSAGES -->
+    <?php foreach ($errors as $error): ?>
+        <div class="alert alert-error"><?= e($error) ?></div>
     <?php endforeach; ?>
 
     <?php if ($success): ?>
-        <div class="message success">
-            <?= htmlspecialchars($success) ?>
-        </div>
+        <div class="alert alert-success"><?= e($success) ?></div>
     <?php endif; ?>
 
-    <h2>New Assignment</h2>
+    <!-- NEW ASSIGNMENT -->
+    <section class="panel">
 
-    <form method="POST" class="assignment-form">
+        <div class="panel-header">
+            <div>
+                <h2>New Assignment</h2>
+                <p>Select a client and trainer to create an assignment.</p>
+            </div>
+        </div>
 
-        <input type="hidden" name="csrf_token"
-               value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+        <form method="POST" class="assignment-form">
 
-        <label>Select Client</label>
+            <input type="hidden" name="csrf_token"
+                   value="<?= e($_SESSION["csrf_token"]) ?>">
 
-        <select name="client_id" required>
-            <option value="">Choose Client</option>
+            <div class="form-group">
+                <label for="client_id">Select Client</label>
 
-            <?php foreach ($clients as $client): ?>
-                <option value="<?= (int)$client["id"] ?>">
-                    <?= htmlspecialchars($client["name"]) ?>
-                    (<?= htmlspecialchars($client["email"]) ?>)
-                </option>
-            <?php endforeach; ?>
-        </select>
+                <select name="client_id" id="client_id" required>
+                    <option value="">Choose Client</option>
 
-        <label>Select Trainer</label>
+                    <?php foreach ($clients as $client): ?>
+                        <option value="<?= (int)$client["id"] ?>">
+                            <?= e($client["name"]) ?> (<?= e($client["email"]) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-        <select name="trainer_id" required>
-            <option value="">Choose Trainer</option>
+            <div class="form-group">
+                <label for="trainer_id">Select Trainer</label>
 
-            <?php foreach ($trainers as $trainer): ?>
-                <option value="<?= (int)$trainer["id"] ?>">
-                    <?= htmlspecialchars($trainer["name"]) ?>
-                    - <?= htmlspecialchars($trainer["specialization"]) ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
+                <select name="trainer_id" id="trainer_id" required>
+                    <option value="">Choose Trainer</option>
 
-        <button type="submit" name="assign_client">
-            Assign Client
-        </button>
+                    <?php foreach ($trainers as $trainer): ?>
+                        <option value="<?= (int)$trainer["id"] ?>">
+                            <?= e($trainer["name"]) ?> - <?= e($trainer["specialization"]) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-    </form>
+            <button type="submit" name="assign_client" class="primary-btn">
+                + Assign Client
+            </button>
 
-    <h2>Current Assignments</h2>
+        </form>
+    </section>
 
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Client</th>
-                    <th>Email</th>
-                    <th>Trainer</th>
-                    <th>Specialization</th>
-                    <th>Assigned Date</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
+    <!-- CURRENT ASSIGNMENTS -->
+    <section class="panel">
 
-            <tbody>
+        <div class="panel-header">
+            <div>
+                <h2>Current Assignments</h2>
+                <p>Overview of clients assigned to trainers.</p>
+            </div>
+
+            <span class="assignment-count">
+                <?= count($assignments) ?> Assignments
+            </span>
+        </div>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client</th>
+                        <th>Email</th>
+                        <th>Trainer</th>
+                        <th>Specialization</th>
+                        <th>Assigned Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody>
                 <?php if (empty($assignments)): ?>
                     <tr>
-                        <td colspan="6">No assignments found.</td>
+                        <td colspan="6" class="empty-state">
+                            No assignments found.
+                        </td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($assignments as $assignment): ?>
                         <tr>
-                            <td><?= htmlspecialchars($assignment["client_name"]) ?></td>
-                            <td><?= htmlspecialchars($assignment["email"]) ?></td>
-                            <td><?= htmlspecialchars($assignment["trainer_name"]) ?></td>
-                            <td><?= htmlspecialchars($assignment["specialization"]) ?></td>
-                            <td><?= htmlspecialchars($assignment["assigned_at"]) ?></td>
+                            <td class="client-name">
+                                <?= e($assignment["client_name"]) ?>
+                            </td>
+
+                            <td><?= e($assignment["email"]) ?></td>
+
+                            <td class="trainer-name">
+                                <?= e($assignment["trainer_name"]) ?>
+                            </td>
+
+                            <td>
+                                <span class="specialization-badge">
+                                    <?= e($assignment["specialization"]) ?>
+                                </span>
+                            </td>
+
+                            <td><?= e($assignment["assigned_at"]) ?></td>
+
                             <td>
                                 <form method="POST"
                                       onsubmit="return confirm('Remove this assignment?');">
 
                                     <input type="hidden" name="csrf_token"
-                                           value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                                           value="<?= e($_SESSION["csrf_token"]) ?>">
 
                                     <input type="hidden" name="assignment_id"
                                            value="<?= (int)$assignment["id"] ?>">
 
                                     <button type="submit"
                                             name="remove_assignment"
-                                            class="delete-btn">
+                                            class="remove-btn">
                                         Remove
                                     </button>
                                 </form>
@@ -322,19 +668,19 @@ $assignments = $conn->query(
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
+                </tbody>
+            </table>
+        </div>
 
-    <a href="dashboard.php" class="back-link">
-        ← Back to Dashboard
-    </a>
+    </section>
 
 </main>
 
-<footer>
-    <p>&copy; <?= date("Y") ?> Smart Gym Management System</p>
+<footer class="admin-footer">
+    &copy; <?= date("Y") ?> Smart Gym Management System
 </footer>
+
+</div>
 
 </body>
 </html>

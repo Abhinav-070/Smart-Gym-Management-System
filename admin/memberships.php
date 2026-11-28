@@ -1,7 +1,6 @@
 
 <?php
 session_start();
-
 require_once "../config/database.php";
 
 if (!isset($_SESSION["admin_id"])) {
@@ -11,7 +10,6 @@ if (!isset($_SESSION["admin_id"])) {
 
 $errors = [];
 
-// CSRF protection
 if (empty($_SESSION["csrf_token"])) {
     $_SESSION["csrf_token"] = bin2hex(random_bytes(32));
 }
@@ -21,7 +19,6 @@ $search = trim($_GET["search"] ?? "");
 $filter_status = $_GET["status"] ?? "";
 $filter_membership = $_GET["membership_status"] ?? "";
 
-// Allowed filter values
 $allowed_statuses = ["Paid", "Pending"];
 $allowed_membership_statuses = ["Active", "Expired", "Upcoming"];
 
@@ -33,11 +30,10 @@ if (!in_array($filter_membership, $allowed_membership_statuses, true)) {
     $filter_membership = "";
 }
 
-// Count pending membership requests
+// Pending membership requests
 $pending_stmt = $conn->query(
     "SELECT COUNT(*) FROM membership_requests WHERE status = 'Pending'"
 );
-
 $pending_requests = (int)$pending_stmt->fetchColumn();
 
 // Assign membership
@@ -47,11 +43,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["assign_membership"]))
         $errors[] = "Invalid request. Please try again.";
     } else {
 
-        $client_id = filter_var(
-            $_POST["client_id"] ?? null,
-            FILTER_VALIDATE_INT
-        );
-
+        $client_id = filter_var($_POST["client_id"] ?? null, FILTER_VALIDATE_INT);
         $plan_name = trim($_POST["plan_name"] ?? "");
         $start_date = $_POST["start_date"] ?? "";
         $end_date = $_POST["end_date"] ?? "";
@@ -62,12 +54,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["assign_membership"]))
             $errors[] = "Please select a valid client.";
         }
 
-        $allowed_plans = [
-            "Monthly",
-            "Quarterly",
-            "Half Yearly",
-            "Yearly"
-        ];
+        $allowed_plans = ["Monthly", "Quarterly", "Half Yearly", "Yearly"];
 
         if (!in_array($plan_name, $allowed_plans, true)) {
             $errors[] = "Select a valid membership plan.";
@@ -101,10 +88,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["assign_membership"]))
 
         if (empty($errors)) {
 
-            $check = $conn->prepare(
-                "SELECT id FROM clients WHERE id = ?"
-            );
-
+            $check = $conn->prepare("SELECT id FROM clients WHERE id = ?");
             $check->execute([$client_id]);
 
             if (!$check->fetch()) {
@@ -140,19 +124,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["delete_membership"]))
         $errors[] = "Invalid request. Please try again.";
     } else {
 
-        $membership_id = filter_var(
-            $_POST["membership_id"] ?? null,
-            FILTER_VALIDATE_INT
-        );
+        $membership_id = filter_var($_POST["membership_id"] ?? null, FILTER_VALIDATE_INT);
 
         if (!$membership_id || $membership_id < 1) {
             $errors[] = "Invalid membership selected.";
         } else {
 
-            $delete = $conn->prepare(
-                "DELETE FROM memberships WHERE id = ?"
-            );
-
+            $delete = $conn->prepare("DELETE FROM memberships WHERE id = ?");
             $delete->execute([$membership_id]);
 
             if ($delete->rowCount() === 0) {
@@ -165,693 +143,805 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["delete_membership"]))
     }
 }
 
-// Get clients
+// Clients for dropdown
 $clients = $conn->query(
-    "SELECT id, name, email
-     FROM clients
-     ORDER BY name ASC"
+    "SELECT id, name, email FROM clients ORDER BY name ASC"
 )->fetchAll();
 
-// Get memberships with search and filters
-$sql = "SELECT
-            m.*,
-            c.name AS client_name,
-            c.email AS client_email
-        FROM memberships m
-        INNER JOIN clients c ON m.client_id = c.id
-        WHERE 1=1";
+// Get memberships
+$sql = "SELECT m.*, c.name AS client_name, c.email AS client_email
+         FROM memberships m
+         INNER JOIN clients c ON m.client_id = c.id
+         WHERE 1=1";
 
 $params = [];
 
-// Search by client name, email or plan
 if ($search !== "") {
-
-    $sql .= " AND (
-        c.name LIKE ?
-        OR c.email LIKE ?
-        OR m.plan_name LIKE ?
-    )";
-
+    $sql .= " AND (c.name LIKE ? OR c.email LIKE ? OR m.plan_name LIKE ?)";
     $search_term = "%" . $search . "%";
-
     $params[] = $search_term;
     $params[] = $search_term;
     $params[] = $search_term;
 }
 
-// Filter by payment status
 if ($filter_status !== "") {
     $sql .= " AND m.payment_status = ?";
     $params[] = $filter_status;
 }
 
-// Filter by membership status
 if ($filter_membership === "Active") {
-
-    $sql .= " AND m.start_date <= CURDATE()
-              AND m.end_date >= CURDATE()";
-
+    $sql .= " AND m.start_date <= CURDATE() AND m.end_date >= CURDATE()";
 } elseif ($filter_membership === "Expired") {
-
     $sql .= " AND m.end_date < CURDATE()";
-
 } elseif ($filter_membership === "Upcoming") {
-
     $sql .= " AND m.start_date > CURDATE()";
 }
 
-// Latest memberships first
 $sql .= " ORDER BY m.id DESC";
 
 $stmt = $conn->prepare($sql);
 $stmt->execute($params);
+$memberships = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$memberships = $stmt->fetchAll();
-
+function e($value) {
+    return htmlspecialchars((string)$value, ENT_QUOTES, "UTF-8");
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Membership Management | Smart Gym</title>
+<link rel="stylesheet" href="../assets/css/style.css">
 
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+* { box-sizing: border-box; }
 
-    <title>Manage Memberships | Smart Gym</title>
+body {
+    margin: 0;
+    background: #090909;
+    color: #fff;
+    font-family: Arial, sans-serif;
+}
 
-    <link rel="stylesheet" href="../assets/css/style.css">
+/* Sidebar */
+.admin-sidebar {
+    width: 250px;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    padding: 30px 18px;
+    background: rgba(12,12,12,.97);
+    border-right: 1px solid #292929;
+    z-index: 1000;
+    overflow-y: auto;
+}
 
-    <style>
+.admin-logo {
+    text-align: center;
+    color: #e63946;
+    font-size: 21px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 40px;
+}
 
-        .container {
-            padding: 50px 5%;
-            min-height: 85vh;
-        }
+.sidebar-label {
+    color: #777;
+    font-size: 11px;
+    letter-spacing: 2px;
+    margin: 25px 12px 12px;
+    text-transform: uppercase;
+}
 
-        h1, h2 {
-            color: #e63946;
-            margin-bottom: 25px;
-        }
+.admin-sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
 
-        .membership-form {
-            max-width: 650px;
-            background: #1c1c1c;
-            padding: 30px;
-            border-radius: 10px;
-            margin-bottom: 45px;
-        }
+.admin-sidebar nav a {
+    display: block;
+    text-decoration: none;
+    color: #aaa;
+    padding: 13px 15px;
+    border-radius: 7px;
+    font-size: 14px;
+    transition: .25s;
+}
 
-        .membership-form label {
-            display: block;
-            margin: 15px 0 8px;
-            color: #ddd;
-        }
+.admin-sidebar nav a:hover,
+.admin-sidebar nav a.active {
+    color: white;
+    background: rgba(230,57,70,.15);
+    border-left: 3px solid #e63946;
+}
 
-        .membership-form input,
-        .membership-form select {
-            width: 100%;
-            padding: 12px;
-            background: #111;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 5px;
-            box-sizing: border-box;
-        }
+.admin-sidebar nav a.logout {
+    color: #ff6b75;
+    margin-top: 15px;
+}
 
-        .membership-form button {
-            width: 100%;
-            margin-top: 25px;
-            padding: 13px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
+/* Main area */
+.admin-main {
+    margin-left: 250px;
+    width: calc(100% - 250px);
+    min-height: 100vh;
+    padding: 35px;
+    padding-bottom: 110px;
+    background:
+        linear-gradient(rgba(8,8,8,.92), rgba(8,8,8,.96)),
+        url("../uploads/admin-bg.jpg") center/cover fixed;
+}
 
-        .membership-form button:hover,
-        .filter-form button:hover,
-        .delete-btn:hover,
-        .request-btn:hover {
-            background: #c1121f;
-        }
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 30px;
+}
 
-        .message {
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            background: #442024;
-            color: #ffb3b8;
-        }
+.topbar h2 {
+    margin: 0;
+    font-size: 22px;
+}
 
-        .success {
-            background: #183c27;
-            color: #a8e6b8;
-        }
+.admin-tag {
+    background: #191919;
+    border: 1px solid #333;
+    padding: 9px 15px;
+    border-radius: 30px;
+    color: #ccc;
+    font-size: 12px;
+}
 
-        .table-container {
-            overflow-x: auto;
-            background: #1c1c1c;
-            border-radius: 8px;
-        }
+.page-heading {
+    margin-bottom: 25px;
+}
 
-        table {
-            width: 100%;
-            min-width: 1050px;
-            border-collapse: collapse;
-        }
+.page-heading h1 {
+    margin: 0 0 10px;
+    font-size: 29px;
+}
 
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #333;
-        }
+.page-heading h1 span {
+    color: #e63946;
+}
 
-        th {
-            background: #080808;
-            color: #e63946;
-        }
+.page-heading p {
+    color: #888;
+    margin: 0;
+}
 
-        td {
-            color: #ddd;
-        }
+/* Messages */
+.message {
+    padding: 15px 18px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    background: #30191c;
+    color: #ffb3b8;
+    border: 1px solid #743038;
+}
 
-        .delete-btn {
-            padding: 8px 12px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
+.message.success {
+    background: #142b1c;
+    color: #a8e6b8;
+    border-color: #245c37;
+}
 
-        .edit-btn {
-            display: inline-block;
-            padding: 8px 12px;
-            background: #198754;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            margin-bottom: 5px;
-        }
+/* Requests button */
+.request-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #e63946;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 7px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: bold;
+    transition: .2s;
+}
 
-        .request-btn {
-            display: inline-block;
-            background: #e63946;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 5px;
-            text-decoration: none;
-            font-weight: bold;
-        }
+.request-btn:hover {
+    background: #c1121f;
+    transform: translateY(-2px);
+}
 
-        .request-count {
-            display: inline-block;
-            background: #111;
-            color: white;
-            padding: 3px 8px;
-            margin-left: 5px;
-            border-radius: 20px;
-            font-size: 13px;
-        }
+.request-count {
+    background: #111;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 12px;
+}
 
-        .back-link {
-            display: inline-block;
-            margin-top: 25px;
-            color: #e63946;
-            text-decoration: none;
-        }
+/* Form card */
+.panel {
+    background: rgba(20,20,20,.95);
+    border: 1px solid #303030;
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 30px;
+}
 
-        /* Status badges */
+.section-heading {
+    font-size: 19px;
+    margin: 0 0 22px;
+    padding-left: 12px;
+    border-left: 3px solid #e63946;
+}
 
-        .status-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
+.membership-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 18px;
+}
 
-        .status-paid {
-            background: #183c27;
-            color: #65d68a;
-        }
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
 
-        .status-pending {
-            background: #443819;
-            color: #ffc107;
-        }
+.form-group label {
+    color: #bbb;
+    font-size: 13px;
+}
 
-        .status-active {
-            background: #183c27;
-            color: #65d68a;
-        }
+.membership-form input,
+.membership-form select,
+.filter-form input,
+.filter-form select {
+    width: 100%;
+    padding: 12px 14px;
+    background: #111;
+    border: 1px solid #353535;
+    color: white;
+    border-radius: 7px;
+    outline: none;
+}
 
-        .status-expired {
-            background: #442020;
-            color: #ff7070;
-        }
+.membership-form input:focus,
+.membership-form select:focus,
+.filter-form input:focus,
+.filter-form select:focus {
+    border-color: #e63946;
+}
 
-        .status-upcoming {
-            background: #443819;
-            color: #ffc107;
-        }
+.form-submit {
+    grid-column: 1 / -1;
+    width: 100%;
+    padding: 13px;
+    background: #e63946;
+    border: none;
+    color: white;
+    border-radius: 7px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: .2s;
+}
 
-        /* Search and filter */
+.form-submit:hover,
+.filter-form button:hover {
+    background: #c1121f;
+}
 
-        .filter-form {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-            align-items: center;
-        }
+/* Filters */
+.filter-form {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
 
-        .filter-form input,
-        .filter-form select {
-            padding: 11px;
-            border-radius: 5px;
-            border: 1px solid #444;
-            background: #111;
-            color: white;
-        }
+.filter-form input {
+    flex: 1;
+    min-width: 190px;
+}
 
-        .filter-form input {
-            flex: 1;
-            min-width: 200px;
-        }
+.filter-form select {
+    width: auto;
+    min-width: 150px;
+}
 
-        .filter-form button {
-            padding: 11px 18px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
+.filter-form button {
+    padding: 12px 20px;
+    background: #e63946;
+    color: white;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+}
 
-        .reset-btn {
-            padding: 11px 18px;
-            background: #333;
-            color: white;
-            border-radius: 5px;
-            text-decoration: none;
-        }
+.reset-btn {
+    padding: 12px 18px;
+    background: #292929;
+    border: 1px solid #383838;
+    color: #ddd;
+    border-radius: 7px;
+    text-decoration: none;
+}
 
-        @media (max-width: 600px) {
+/* Table */
+.table-container {
+    background: rgba(20,20,20,.95);
+    border: 1px solid #2c2c2c;
+    border-radius: 12px;
+    overflow-x: auto;
+}
 
-            .container {
-                padding: 30px 4%;
-            }
+table {
+    width: 100%;
+    min-width: 1050px;
+    border-collapse: collapse;
+}
 
-            .membership-form {
-                padding: 20px;
-            }
+thead {
+    background: #101010;
+}
 
-            .filter-form {
-                flex-direction: column;
-                align-items: stretch;
-            }
+th {
+    padding: 16px;
+    text-align: left;
+    color: #e63946;
+    font-size: 12px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
 
-            .filter-form input,
-            .filter-form select,
-            .filter-form button,
-            .reset-btn {
-                width: 100%;
-                box-sizing: border-box;
-            }
+td {
+    padding: 15px;
+    border-top: 1px solid #292929;
+    color: #ccc;
+    font-size: 13px;
+}
 
-        }
+tbody tr:hover {
+    background: #222;
+}
 
-    </style>
+.client-name {
+    color: white;
+    font-weight: bold;
+}
 
+.client-email {
+    color: #888;
+    font-size: 12px;
+}
+
+.amount {
+    color: #fff;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 6px 11px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.status-paid,
+.status-active {
+    background: #183c27;
+    color: #65d68a;
+}
+
+.status-pending,
+.status-upcoming {
+    background: #443819;
+    color: #ffc107;
+}
+
+.status-expired {
+    background: #442020;
+    color: #ff7070;
+}
+
+/* Action buttons */
+.edit-btn {
+    display: inline-block;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: #193c2a;
+    border: 1px solid #286640;
+    color: #78d89a;
+    border-radius: 6px;
+    text-decoration: none;
+}
+
+.delete-btn {
+    padding: 8px 12px;
+    background: rgba(230,57,70,.12);
+    border: 1px solid #6c2a30;
+    color: #ff6b75;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.delete-btn:hover {
+    background: #e63946;
+    color: white;
+}
+
+.empty-message {
+    padding: 35px;
+    text-align: center;
+    color: #888;
+}
+
+/* Back link */
+.back-link {
+    display: inline-block;
+    margin-top: 25px;
+    color: #e63946;
+    text-decoration: none;
+}
+
+/* Fixed footer */
+.admin-footer {
+    position: fixed;
+    bottom: 0;
+    left: 250px;
+    right: 0;
+    padding: 15px;
+    text-align: center;
+    background: rgba(8,8,8,.96);
+    border-top: 1px solid #292929;
+    color: #777;
+    font-size: 12px;
+    z-index: 900;
+    backdrop-filter: blur(10px);
+}
+
+/* Responsive */
+@media(max-width:900px) {
+    .admin-sidebar {
+        position: relative;
+        width: 100%;
+        height: auto;
+        padding: 15px;
+    }
+
+    .admin-logo {
+        margin-bottom: 15px;
+    }
+
+    .sidebar-label {
+        display: none;
+    }
+
+    .admin-sidebar nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .admin-sidebar nav a {
+        padding: 10px;
+        font-size: 12px;
+    }
+
+    .admin-main {
+        margin-left: 0;
+        width: 100%;
+        padding: 25px 5%;
+    }
+
+    .admin-footer {
+        left: 0;
+    }
+}
+
+@media(max-width:600px) {
+    .topbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .page-heading h1 {
+        font-size: 24px;
+    }
+
+    .panel {
+        padding: 18px;
+    }
+
+    .membership-form {
+        grid-template-columns: 1fr;
+    }
+
+    .form-submit {
+        grid-column: auto;
+    }
+
+    .filter-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-form input,
+    .filter-form select,
+    .filter-form button,
+    .reset-btn {
+        width: 100%;
+    }
+}
+</style>
 </head>
 
 <body>
 
-<header class="navbar">
+<div class="admin-layout">
 
-    <h2>SMART GYM ADMIN</h2>
+<!-- Sidebar -->
+<aside class="admin-sidebar">
 
+    <div class="admin-logo">SMART GYM</div>
+
+    <div class="sidebar-label">Main Menu</div>
     <nav>
-        <a href="dashboard.php">Dashboard</a>
-        <a href="clients.php">Clients</a>
-        <a href="memberships.php">Memberships</a>
-        <a href="logout.php">Logout</a>
+        <a href="dashboard.php">▦ Dashboard</a>
     </nav>
 
-</header>
+    <div class="sidebar-label">Management</div>
+    <nav>
+        <a href="clients.php">♙ Manage Clients</a>
+        <a href="memberships.php" class="active">▤ Memberships</a>
+        <a href="trainers.php">♟ Trainers</a>
+        <a href="dietitians.php">✚ Dietitians</a>
+        <a href="assign_clients.php">⇄ Assign Clients</a>
+        <a href="complaints.php">⚑ Complaints</a>
+        <a href="reports.php">▥ Reports</a>
+    </nav>
 
-<main class="container">
+    <div class="sidebar-label">Account</div>
+    <nav>
+        <a href="logout.php" class="logout">↪ Logout</a>
+    </nav>
 
-    <div style="margin: 20px 0;">
+</aside>
 
-        <a href="membership_requests.php" class="request-btn">
+<!-- Main -->
+<main class="admin-main">
 
-            + Membership Requests
-
-            <?php if ($pending_requests > 0): ?>
-
-                <span class="request-count">
-                    <?= $pending_requests ?>
-                </span>
-
-            <?php endif; ?>
-
-        </a>
-
+    <div class="topbar">
+        <h2>Admin Panel</h2>
+        <div class="admin-tag">● Administrator</div>
     </div>
 
-    <h1>Membership Management</h1>
+    <div class="page-heading">
+        <h1>Membership <span>Management</span></h1>
+        <p>Assign memberships and manage payments and member subscriptions.</p>
+    </div>
 
     <?php if (!empty($errors)): ?>
-
         <div class="message">
             <ul>
-
                 <?php foreach ($errors as $error): ?>
-
-                    <li><?= htmlspecialchars($error) ?></li>
-
+                    <li><?= e($error) ?></li>
                 <?php endforeach; ?>
-
-            </ul>
         </div>
-
     <?php endif; ?>
 
     <?php if (($_GET["success"] ?? "") === "assigned"): ?>
-
-        <div class="message success">
-            Membership assigned successfully!
-        </div>
-
+        <div class="message success">Membership assigned successfully!</div>
     <?php elseif (($_GET["success"] ?? "") === "deleted"): ?>
-
-        <div class="message success">
-            Membership deleted successfully!
-        </div>
-
+        <div class="message success">Membership deleted successfully!</div>
     <?php elseif (($_GET["success"] ?? "") === "updated"): ?>
-
-        <div class="message success">
-            Membership updated successfully!
-        </div>
-
+        <div class="message success">Membership updated successfully!</div>
     <?php endif; ?>
 
-    <h2>Assign Membership</h2>
+    <a href="membership_requests.php" class="request-btn">
+        + Membership Requests
+        <?php if ($pending_requests > 0): ?>
+            <span class="request-count"><?= $pending_requests ?></span>
+        <?php endif; ?>
+    </a>
 
-    <form method="POST" class="membership-form">
+    <!-- Assign Membership -->
+    <section class="panel" style="margin-top:25px;">
 
-        <input
-            type="hidden"
-            name="csrf_token"
-            value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>"
-        >
+        <h2 class="section-heading">Assign Membership</h2>
 
-        <label>Select Client</label>
+        <form method="POST" class="membership-form">
 
-        <select name="client_id" required>
+            <input type="hidden" name="csrf_token"
+                   value="<?= e($_SESSION["csrf_token"]) ?>">
 
-            <option value="">Choose Client</option>
+            <div class="form-group">
+                <label>Select Client</label>
+                <select name="client_id" required>
+                    <option value="">Choose Client</option>
+                    <?php foreach ($clients as $client): ?>
+                        <option value="<?= (int)$client["id"] ?>">
+                            <?= e($client["name"]) ?> (<?= e($client["email"]) ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-            <?php foreach ($clients as $client): ?>
+            <div class="form-group">
+                <label>Membership Plan</label>
+                <select name="plan_name" required>
+                    <option value="">Choose Plan</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Half Yearly">Half Yearly</option>
+                    <option value="Yearly">Yearly</option>
+                </select>
+            </div>
 
-                <option value="<?= (int)$client["id"] ?>">
+            <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" name="start_date" required>
+            </div>
 
-                    <?= htmlspecialchars($client["name"]) ?>
-                    (<?= htmlspecialchars($client["email"]) ?>)
+            <div class="form-group">
+                <label>Expiry Date</label>
+                <input type="date" name="end_date" required>
+            </div>
 
-                </option>
+            <div class="form-group">
+                <label>Amount (₹)</label>
+                <input type="number" name="amount"
+                       min="0" max="99999999.99" step="0.01" required>
+            </div>
 
-            <?php endforeach; ?>
+            <div class="form-group">
+                <label>Payment Status</label>
+                <select name="payment_status" required>
+                    <option value="Pending">Pending</option>
+                    <option value="Paid">Paid</option>
+                </select>
+            </div>
 
-        </select>
+            <button type="submit" name="assign_membership" class="form-submit">
+                Assign Membership
+            </button>
 
-        <label>Membership Plan</label>
+        </form>
 
-        <select name="plan_name" required>
+    </section>
 
-            <option value="">Choose Plan</option>
-            <option value="Monthly">Monthly</option>
-            <option value="Quarterly">Quarterly</option>
-            <option value="Half Yearly">Half Yearly</option>
-            <option value="Yearly">Yearly</option>
-
-        </select>
-
-        <label>Start Date</label>
-
-        <input type="date" name="start_date" required>
-
-        <label>Expiry Date</label>
-
-        <input type="date" name="end_date" required>
-
-        <label>Amount (₹)</label>
-
-        <input
-            type="number"
-            name="amount"
-            min="0"
-            max="99999999.99"
-            step="0.01"
-            required
-        >
-
-        <label>Payment Status</label>
-
-        <select name="payment_status" required>
-
-            <option value="Pending">Pending</option>
-            <option value="Paid">Paid</option>
-
-        </select>
-
-        <button type="submit" name="assign_membership">
-            Assign Membership
-        </button>
-
-    </form>
-
-    <h2>All Memberships</h2>
-
-    <!-- Search and Filter -->
+    <!-- All memberships -->
+    <h2 class="section-heading">All Memberships</h2>
 
     <form method="GET" class="filter-form">
 
-        <input
-            type="text"
-            name="search"
-            placeholder="Search client, email or plan..."
-            value="<?= htmlspecialchars($search) ?>"
-        >
+        <input type="text" name="search"
+               placeholder="Search client, email or plan..."
+               value="<?= e($search) ?>">
 
         <select name="status">
-
             <option value="">All Payment Statuses</option>
-
-            <option value="Paid"
-                <?= $filter_status === "Paid" ? "selected" : "" ?>>
-                Paid
-            </option>
-
-            <option value="Pending"
-                <?= $filter_status === "Pending" ? "selected" : "" ?>>
-                Pending
-            </option>
-
+            <option value="Paid" <?= $filter_status === "Paid" ? "selected" : "" ?>>Paid</option>
+            <option value="Pending" <?= $filter_status === "Pending" ? "selected" : "" ?>>Pending</option>
         </select>
 
         <select name="membership_status">
-
             <option value="">All Membership Statuses</option>
-
-            <option value="Active"
-                <?= $filter_membership === "Active" ? "selected" : "" ?>>
-                Active
-            </option>
-
-            <option value="Expired"
-                <?= $filter_membership === "Expired" ? "selected" : "" ?>>
-                Expired
-            </option>
-
-            <option value="Upcoming"
-                <?= $filter_membership === "Upcoming" ? "selected" : "" ?>>
-                Upcoming
-            </option>
-
+            <option value="Active" <?= $filter_membership === "Active" ? "selected" : "" ?>>Active</option>
+            <option value="Expired" <?= $filter_membership === "Expired" ? "selected" : "" ?>>Expired</option>
+            <option value="Upcoming" <?= $filter_membership === "Upcoming" ? "selected" : "" ?>>Upcoming</option>
         </select>
 
-        <button type="submit">Search</button>
-
+        <button type="submit">Filter</button>
         <a href="memberships.php" class="reset-btn">Reset</a>
 
     </form>
 
     <div class="table-container">
 
+        <?php if (empty($memberships)): ?>
+            <div class="empty-message">No memberships found.</div>
+        <?php else: ?>
+
         <table>
-
             <thead>
-
                 <tr>
                     <th>ID</th>
                     <th>Client</th>
                     <th>Plan</th>
                     <th>Start Date</th>
-                    <th>Expiry Date</th>
+                    <th>Expiry</th>
                     <th>Amount</th>
                     <th>Payment</th>
-                    <th>Membership Status</th>
+                    <th>Status</th>
                     <th>Action</th>
                 </tr>
-
             </thead>
 
             <tbody>
+            <?php foreach ($memberships as $membership): ?>
 
-                <?php if (empty($memberships)): ?>
+                <?php
+                $today = date("Y-m-d");
 
-                    <tr>
-                        <td colspan="9">No memberships found.</td>
-                    </tr>
+                if ($today < $membership["start_date"]) {
+                    $membership_status = "Upcoming";
+                } elseif ($today > $membership["end_date"]) {
+                    $membership_status = "Expired";
+                } else {
+                    $membership_status = "Active";
+                }
 
-                <?php else: ?>
+                $payment_status = $membership["payment_status"] ?? "Pending";
+                ?>
 
-                    <?php foreach ($memberships as $membership): ?>
+                <tr>
+                    <td>#<?= (int)$membership["id"] ?></td>
 
-                        <?php
+                    <td>
+                        <div class="client-name"><?= e($membership["client_name"]) ?></div>
+                        <div class="client-email"><?= e($membership["client_email"]) ?></div>
+                    </td>
 
-                        $today = date("Y-m-d");
+                    <td><?= e($membership["plan_name"]) ?></td>
+                    <td><?= e($membership["start_date"]) ?></td>
+                    <td><?= e($membership["end_date"]) ?></td>
 
-                        if ($today < $membership["start_date"]) {
-                            $membership_status = "Upcoming";
-                        } elseif ($today > $membership["end_date"]) {
-                            $membership_status = "Expired";
-                        } else {
-                            $membership_status = "Active";
-                        }
+                    <td class="amount">
+                        ₹<?= number_format((float)$membership["amount"], 2) ?>
+                    </td>
 
-                        $payment_status = $membership["payment_status"] ?? "Pending";
+                    <td>
+                        <span class="status-badge status-<?= strtolower(e($payment_status)) ?>">
+                            <?= e($payment_status) ?>
+                        </span>
+                    </td>
 
-                        ?>
+                    <td>
+                        <span class="status-badge status-<?= strtolower(e($membership_status)) ?>">
+                            <?= e($membership_status) ?>
+                        </span>
+                    </td>
 
-                        <tr>
+                    <td>
+                        <a href="edit_membership.php?id=<?= (int)$membership["id"] ?>"
+                           class="edit-btn">Edit</a>
 
-                            <td>
-                                <?= (int)$membership["id"] ?>
-                            </td>
+                        <form method="POST"
+                              onsubmit="return confirm('Delete this membership?');">
 
-                            <td>
+                            <input type="hidden" name="csrf_token"
+                                   value="<?= e($_SESSION["csrf_token"]) ?>">
 
-                                <?= htmlspecialchars($membership["client_name"]) ?>
+                            <input type="hidden" name="membership_id"
+                                   value="<?= (int)$membership["id"] ?>">
 
-                                <br>
+                            <button type="submit" name="delete_membership"
+                                    class="delete-btn">Delete</button>
+                        </form>
+                    </td>
+                </tr>
 
-                                <small>
-                                    <?= htmlspecialchars($membership["client_email"]) ?>
-                                </small>
-
-                            </td>
-
-                            <td>
-                                <?= htmlspecialchars($membership["plan_name"]) ?>
-                            </td>
-
-                            <td>
-                                <?= htmlspecialchars($membership["start_date"]) ?>
-                            </td>
-
-                            <td>
-                                <?= htmlspecialchars($membership["end_date"]) ?>
-                            </td>
-
-                            <td>
-                                ₹<?= number_format((float)$membership["amount"], 2) ?>
-                            </td>
-
-                            <td>
-
-                                <span class="status-badge status-<?= strtolower(htmlspecialchars($payment_status)) ?>">
-
-                                    <?= htmlspecialchars($payment_status) ?>
-
-                                </span>
-
-                            </td>
-
-                            <td>
-
-                                <span class="status-badge status-<?= strtolower($membership_status) ?>">
-
-                                    <?= htmlspecialchars($membership_status) ?>
-
-                                </span>
-
-                            </td>
-
-                            <td>
-
-                                <a
-                                    href="edit_membership.php?id=<?= (int)$membership["id"] ?>"
-                                    class="edit-btn"
-                                >
-                                    Edit
-                                </a>
-
-                                <form
-                                    method="POST"
-                                    onsubmit="return confirm('Delete this membership?');"
-                                >
-
-                                    <input
-                                        type="hidden"
-                                        name="csrf_token"
-                                        value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>"
-                                    >
-
-                                    <input
-                                        type="hidden"
-                                        name="membership_id"
-                                        value="<?= (int)$membership["id"] ?>"
-                                    >
-
-                                    <button
-                                        type="submit"
-                                        name="delete_membership"
-                                        class="delete-btn"
-                                    >
-                                        Delete
-                                    </button>
-
-                                </form>
-
-                            </td>
-
-                        </tr>
-
-                    <?php endforeach; ?>
-
-                <?php endif; ?>
-
+            <?php endforeach; ?>
             </tbody>
-
         </table>
+
+        <?php endif; ?>
 
     </div>
 
-    <a href="dashboard.php" class="back-link">
-        ← Back to Dashboard
-    </a>
+    <a href="dashboard.php" class="back-link">← Back to Dashboard</a>
 
 </main>
+</div>
 
-<footer>
-    <p>&copy; <?= date("Y") ?> Smart Gym Management System</p>
+<footer class="admin-footer">
+    &copy; <?= date("Y") ?> Smart Gym Management System
 </footer>
 
 </body>

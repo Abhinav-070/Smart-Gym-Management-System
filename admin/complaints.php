@@ -1,7 +1,6 @@
 
 <?php
 session_start();
-
 require_once "../config/database.php";
 
 if (!isset($_SESSION["admin_id"])) {
@@ -54,7 +53,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if (empty($errors)) {
 
-            // Update only an existing complaint
             $update = $conn->prepare("
                 UPDATE complaints
                 SET status = ?,
@@ -168,372 +166,758 @@ $stats_stmt = $conn->query("
 ");
 
 $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+
+function e($value) {
+    return htmlspecialchars((string)$value, ENT_QUOTES, "UTF-8");
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Complaints | Smart Gym Admin</title>
 
-    <title>Complaints | Smart Gym Admin</title>
+<link rel="stylesheet" href="../assets/css/style.css">
 
-    <link rel="stylesheet" href="../assets/css/style.css">
+<style>
+* {
+    box-sizing: border-box;
+}
 
-    <style>
-        .page {
-            max-width: 1200px;
-            margin: auto;
-            padding: 45px 20px;
-        }
+body {
+    margin: 0;
+    background: #090909;
+    color: #f5f5f5;
+    font-family: Arial, Helvetica, sans-serif;
+}
 
-        h1, h2 {
-            color: #e63946;
-        }
+.admin-layout {
+    min-height: 100vh;
+}
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 20px;
-            margin: 25px 0;
-        }
+/* SIDEBAR */
+.admin-sidebar {
+    width: 250px;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1000;
+    background: rgba(10,10,10,.97);
+    border-right: 1px solid #242424;
+    padding: 28px 18px;
+    overflow-y: auto;
+}
 
-        .stat-card {
-            background: #1c1c1c;
-            padding: 20px;
-            border-radius: 10px;
-            border-left: 4px solid #e63946;
-        }
+.admin-brand {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    color: #fff;
+    margin: 0 0 35px;
+}
 
-        .stat-card h3 {
-            color: #e63946;
-        }
+.admin-brand span {
+    color: #e63946;
+}
 
-        .stat-card p {
-            color: white;
-            font-size: 25px;
-            font-weight: bold;
-        }
+.admin-sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
 
-        .card {
-            background: #1c1c1c;
-            padding: 25px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            border-left: 4px solid #e63946;
-        }
+.admin-sidebar nav a {
+    display: block;
+    text-decoration: none;
+    color: #aaa;
+    padding: 13px 15px;
+    border-radius: 9px;
+    font-size: 14px;
+    transition: .2s;
+}
 
-        .filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 25px;
-        }
+.admin-sidebar nav a:hover,
+.admin-sidebar nav a.active {
+    background: rgba(230,57,70,.12);
+    color: #fff;
+    border-left: 3px solid #e63946;
+}
 
-        input, select, textarea {
-            padding: 11px;
-            background: #111;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 5px;
-            box-sizing: border-box;
-        }
+/* MAIN CONTENT */
+.admin-main {
+    margin-left: 250px;
+    min-height: 100vh;
+    padding: 35px 40px 110px;
+    background:
+        linear-gradient(rgba(5,5,5,.90), rgba(5,5,5,.94)),
+        url("../uploads/admin-bg.jpg") center/cover fixed;
+}
 
-        .filters input {
-            flex: 1;
-            min-width: 200px;
-        }
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+}
 
-        .filters select {
-            min-width: 160px;
-        }
+.topbar-label {
+    color: #888;
+    font-size: 13px;
+}
 
-        textarea {
-            width: 100%;
-            min-height: 110px;
-            resize: vertical;
-        }
+.topbar-label strong {
+    color: #eee;
+}
 
-        button {
-            padding: 11px 22px;
-            background: #e63946;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
+.page-heading {
+    margin-bottom: 28px;
+}
 
-        button:hover {
-            background: #c1121f;
-        }
+.page-heading h1 {
+    font-size: 30px;
+    margin: 0 0 10px;
+    font-weight: 800;
+}
 
-        .message {
-            padding: 12px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
+.page-heading p {
+    color: #929292;
+    font-size: 14px;
+    margin: 0;
+}
 
-        .success {
-            background: #183c27;
-            color: #65d68a;
-        }
+/* ALERTS */
+.alert {
+    padding: 14px 17px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
 
-        .error {
-            background: #442020;
-            color: #ff7070;
-        }
+.alert-error {
+    background: rgba(230,57,70,.12);
+    border: 1px solid rgba(230,57,70,.3);
+    color: #ff9ca3;
+}
 
-        .status {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
+.alert-success {
+    background: rgba(40,170,95,.12);
+    border: 1px solid rgba(40,170,95,.25);
+    color: #91e0ae;
+}
 
-        .pending {
-            background: #443819;
-            color: #ffc107;
-        }
+/* STATISTICS */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0,1fr));
+    gap: 17px;
+    margin-bottom: 28px;
+}
 
-        .in-progress {
-            background: #263b52;
-            color: #79baff;
-        }
+.stat-card {
+    background: rgba(19,19,19,.94);
+    border: 1px solid #292929;
+    border-radius: 14px;
+    padding: 21px;
+    transition: .2s;
+}
 
-        .resolved {
-            background: #183c27;
-            color: #65d68a;
-        }
+.stat-card:hover {
+    transform: translateY(-3px);
+    border-color: #555;
+}
 
-        .details {
-            background: #252525;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 15px 0;
-        }
+.stat-label {
+    color: #999;
+    font-size: 13px;
+    margin-bottom: 14px;
+}
 
-        .muted {
-            color: #bbb;
-        }
+.stat-value {
+    color: #fff;
+    font-size: 29px;
+    font-weight: 800;
+}
 
-        label {
-            display: block;
-            margin: 15px 0 8px;
-            color: white;
-        }
+.stat-card.pending-card {
+    border-left: 3px solid #e6a23c;
+}
 
-        .back {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #e63946;
-            text-decoration: none;
-        }
+.stat-card.progress-card {
+    border-left: 3px solid #4b9be8;
+}
 
-        @media (max-width: 600px) {
-            .filters {
-                flex-direction: column;
-            }
+.stat-card.resolved-card {
+    border-left: 3px solid #39b878;
+}
 
-            .filters input,
-            .filters select,
-            .filters button {
-                width: 100%;
-            }
-        }
-    </style>
+.stat-card.total-card {
+    border-left: 3px solid #e63946;
+}
+
+/* FILTER PANEL */
+.panel {
+    background: rgba(19,19,19,.94);
+    border: 1px solid #292929;
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 12px 35px rgba(0,0,0,.18);
+}
+
+.panel-header {
+    margin-bottom: 20px;
+}
+
+.panel-header h2 {
+    font-size: 19px;
+    margin: 0;
+}
+
+.panel-header p {
+    color: #888;
+    margin: 7px 0 0;
+    font-size: 13px;
+}
+
+.filters {
+    display: grid;
+    grid-template-columns: 1fr 210px auto auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.filters input,
+.filters select {
+    width: 100%;
+    padding: 13px 14px;
+    background: #101010;
+    border: 1px solid #333;
+    color: #fff;
+    border-radius: 9px;
+    outline: none;
+    font-size: 14px;
+}
+
+.filters input:focus,
+.filters select:focus {
+    border-color: #e63946;
+}
+
+.search-btn {
+    padding: 13px 22px;
+    background: #e63946;
+    color: #fff;
+    border: 0;
+    border-radius: 9px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: .2s;
+}
+
+.search-btn:hover {
+    background: #c92d3a;
+}
+
+.reset-btn {
+    padding: 13px 18px;
+    border: 1px solid #444;
+    color: #ccc;
+    background: transparent;
+    border-radius: 9px;
+    text-decoration: none;
+    text-align: center;
+    font-size: 13px;
+}
+
+.reset-btn:hover {
+    border-color: #e63946;
+    color: #fff;
+}
+
+/* COMPLAINT CARD */
+.complaint-card {
+    background: rgba(19,19,19,.96);
+    border: 1px solid #292929;
+    border-radius: 15px;
+    padding: 25px;
+    margin-bottom: 20px;
+}
+
+.complaint-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 15px;
+    margin-bottom: 18px;
+}
+
+.complaint-top h2 {
+    font-size: 19px;
+    color: #fff;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.complaint-id {
+    color: #777;
+    font-size: 12px;
+    margin-bottom: 7px;
+}
+
+.status {
+    display: inline-block;
+    padding: 7px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.status.pending {
+    background: rgba(230,162,60,.13);
+    color: #ffc66d;
+    border: 1px solid rgba(230,162,60,.25);
+}
+
+.status.in-progress {
+    background: rgba(75,155,232,.13);
+    color: #80bdff;
+    border: 1px solid rgba(75,155,232,.25);
+}
+
+.status.resolved {
+    background: rgba(57,184,120,.13);
+    color: #75dfa6;
+    border: 1px solid rgba(57,184,120,.25);
+}
+
+.client-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    color: #999;
+    font-size: 13px;
+    margin-bottom: 18px;
+}
+
+.client-info strong {
+    color: #ddd;
+}
+
+.details {
+    background: #101010;
+    border: 1px solid #292929;
+    padding: 17px;
+    border-radius: 10px;
+    margin: 15px 0;
+}
+
+.details strong {
+    color: #e63946;
+    font-size: 13px;
+}
+
+.details p {
+    color: #ccc;
+    line-height: 1.7;
+    font-size: 14px;
+    margin: 10px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.submitted-date {
+    color: #777;
+    font-size: 12px;
+    margin: 15px 0 20px;
+}
+
+/* RESPONSE FORM */
+.response-form {
+    border-top: 1px solid #292929;
+    padding-top: 20px;
+}
+
+.form-group {
+    margin-bottom: 18px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 9px;
+    color: #ccc;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 13px 14px;
+    background: #101010;
+    color: #fff;
+    border: 1px solid #333;
+    border-radius: 9px;
+    outline: none;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+}
+
+.form-group textarea {
+    min-height: 115px;
+    resize: vertical;
+    line-height: 1.6;
+}
+
+.form-group textarea:focus,
+.form-group select:focus {
+    border-color: #e63946;
+}
+
+.update-btn {
+    padding: 13px 22px;
+    background: #e63946;
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: .2s;
+}
+
+.update-btn:hover {
+    background: #c92d3a;
+    transform: translateY(-1px);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #888;
+}
+
+.empty-state h3 {
+    color: #ddd;
+    margin-bottom: 8px;
+}
+
+/* FOOTER */
+.admin-footer {
+    position: fixed;
+    bottom: 0;
+    left: 250px;
+    right: 0;
+    z-index: 100;
+    background: rgba(8,8,8,.96);
+    border-top: 1px solid #252525;
+    text-align: center;
+    padding: 15px;
+    color: #777;
+    font-size: 12px;
+}
+
+/* RESPONSIVE */
+@media(max-width: 1100px) {
+    .stats-grid {
+        grid-template-columns: repeat(2,1fr);
+    }
+
+    .filters {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media(max-width: 1000px) {
+    .admin-sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        padding: 18px;
+        border-right: none;
+        border-bottom: 1px solid #252525;
+    }
+
+    .admin-brand {
+        margin-bottom: 15px;
+    }
+
+    .admin-sidebar nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .admin-sidebar nav a {
+        padding: 10px 12px;
+    }
+
+    .admin-main {
+        margin-left: 0;
+        padding: 25px 20px 110px;
+        background-attachment: scroll;
+    }
+
+    .admin-footer {
+        left: 0;
+    }
+}
+
+@media(max-width: 600px) {
+    .admin-main {
+        padding: 22px 13px 110px;
+    }
+
+    .page-heading h1 {
+        font-size: 24px;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .stat-card {
+        padding: 15px;
+    }
+
+    .stat-value {
+        font-size: 24px;
+    }
+
+    .panel {
+        padding: 17px;
+    }
+
+    .filters {
+        grid-template-columns: 1fr;
+    }
+
+    .complaint-card {
+        padding: 17px;
+    }
+
+    .complaint-top {
+        flex-direction: column;
+    }
+
+    .update-btn {
+        width: 100%;
+    }
+}
+</style>
 </head>
 
 <body>
 
-<header class="navbar">
-    <h2>SMART GYM</h2>
+<div class="admin-layout">
+
+<!-- SIDEBAR -->
+<aside class="admin-sidebar">
+    <h2 class="admin-brand">SMART GYM <span>ADMIN</span></h2>
 
     <nav>
         <a href="dashboard.php">Dashboard</a>
+        <a href="clients.php">Clients</a>
+        <a href="memberships.php">Memberships</a>
+        <a href="trainers.php">Trainers</a>
+        <a href="dietitians.php">Dietitians</a>
+        <a href="assign_clients.php">Assign Clients</a>
+        <a href="complaints.php" class="active">Complaints</a>
+        <a href="reports.php">Reports</a>
         <a href="logout.php">Logout</a>
     </nav>
-</header>
+</aside>
 
-<main class="page">
+<!-- MAIN CONTENT -->
+<main class="admin-main">
 
-    <a href="dashboard.php" class="back">← Back to Dashboard</a>
-
-    <h1>Complaint Management</h1>
-
-    <p class="muted">
-        Review client complaints, provide responses and manage their status.
-    </p>
-
-    <?php if ($success): ?>
-        <div class="message success">
-            <?= htmlspecialchars($success) ?>
+    <div class="topbar">
+        <div class="topbar-label">
+            ADMIN PANEL / <strong>COMPLAINT MANAGEMENT</strong>
         </div>
+    </div>
+
+    <div class="page-heading">
+        <h1>Complaint Management</h1>
+        <p>Review client complaints, provide responses and manage their status.</p>
+    </div>
+
+    <!-- ALERTS -->
+    <?php if ($success): ?>
+        <div class="alert alert-success"><?= e($success) ?></div>
     <?php endif; ?>
 
     <?php foreach ($errors as $error): ?>
-        <div class="message error">
-            <?= htmlspecialchars($error) ?>
-        </div>
+        <div class="alert alert-error"><?= e($error) ?></div>
     <?php endforeach; ?>
 
-    <section class="stats">
+    <!-- STATISTICS -->
+    <section class="stats-grid">
 
-        <div class="stat-card">
-            <h3>Total Complaints</h3>
-            <p><?= (int) ($stats["total"] ?? 0) ?></p>
+        <div class="stat-card total-card">
+            <div class="stat-label">Total Complaints</div>
+            <div class="stat-value"><?= (int)($stats["total"] ?? 0) ?></div>
         </div>
 
-        <div class="stat-card">
-            <h3>Pending</h3>
-            <p><?= (int) ($stats["pending"] ?? 0) ?></p>
+        <div class="stat-card pending-card">
+            <div class="stat-label">Pending</div>
+            <div class="stat-value"><?= (int)($stats["pending"] ?? 0) ?></div>
         </div>
 
-        <div class="stat-card">
-            <h3>In Progress</h3>
-            <p><?= (int) ($stats["in_progress"] ?? 0) ?></p>
+        <div class="stat-card progress-card">
+            <div class="stat-label">In Progress</div>
+            <div class="stat-value"><?= (int)($stats["in_progress"] ?? 0) ?></div>
         </div>
 
-        <div class="stat-card">
-            <h3>Resolved</h3>
-            <p><?= (int) ($stats["resolved"] ?? 0) ?></p>
+        <div class="stat-card resolved-card">
+            <div class="stat-label">Resolved</div>
+            <div class="stat-value"><?= (int)($stats["resolved"] ?? 0) ?></div>
         </div>
 
     </section>
 
-    <form method="GET" class="filters">
+    <!-- SEARCH AND FILTER -->
+    <section class="panel">
 
-        <input
-            type="text"
-            name="search"
-            placeholder="Search client or complaint..."
-            value="<?= htmlspecialchars($search) ?>"
-        >
+        <div class="panel-header">
+            <h2>Search & Filter Complaints</h2>
+            <p>Find complaints by client details, subject or message.</p>
+        </div>
 
-        <select name="status">
-            <option value="">All Statuses</option>
+        <form method="GET" class="filters">
 
-            <option value="Pending"
-                <?= $filter_status === "Pending" ? "selected" : "" ?>>
-                Pending
-            </option>
+            <input
+                type="text"
+                name="search"
+                placeholder="Search client or complaint..."
+                value="<?= e($search) ?>"
+            >
 
-            <option value="In Progress"
-                <?= $filter_status === "In Progress" ? "selected" : "" ?>>
-                In Progress
-            </option>
+            <select name="status">
+                <option value="">All Statuses</option>
 
-            <option value="Resolved"
-                <?= $filter_status === "Resolved" ? "selected" : "" ?>>
-                Resolved
-            </option>
-        </select>
+                <option value="Pending"
+                    <?= $filter_status === "Pending" ? "selected" : "" ?>>
+                    Pending
+                </option>
 
-        <button type="submit">Search</button>
+                <option value="In Progress"
+                    <?= $filter_status === "In Progress" ? "selected" : "" ?>>
+                    In Progress
+                </option>
 
-        <a href="complaints.php" class="back">Reset</a>
+                <option value="Resolved"
+                    <?= $filter_status === "Resolved" ? "selected" : "" ?>>
+                    Resolved
+                </option>
+            </select>
 
-    </form>
+            <button type="submit" class="search-btn">Search</button>
 
-    <h2>Client Complaints</h2>
+            <a href="complaints.php" class="reset-btn">Reset</a>
+
+        </form>
+    </section>
+
+    <!-- COMPLAINT LIST -->
+    <div class="page-heading">
+        <h1 style="font-size:22px;">Client Complaints</h1>
+        <p><?= count($complaints) ?> complaint(s) found</p>
+    </div>
 
     <?php if ($complaints): ?>
 
         <?php foreach ($complaints as $complaint): ?>
 
-            <section class="card">
+            <?php
+                $status_class = match ($complaint["status"]) {
+                    "Resolved" => "resolved",
+                    "In Progress" => "in-progress",
+                    default => "pending"
+                };
+            ?>
 
-                <h2>
-                    <?= htmlspecialchars($complaint["subject"]) ?>
-                </h2>
+            <section class="complaint-card">
 
-                <p>
-                    <strong>Client:</strong>
-                    <?= htmlspecialchars($complaint["client_name"]) ?>
-                </p>
+                <div class="complaint-top">
+                    <div>
+                        <div class="complaint-id">
+                            COMPLAINT #<?= (int)$complaint["id"] ?>
+                        </div>
 
-                <p class="muted">
-                    <?= htmlspecialchars($complaint["client_email"]) ?>
-                    |
-                    <?= htmlspecialchars($complaint["client_phone"]) ?>
-                </p>
-
-                <div class="details">
-
-                    <strong>Complaint Details</strong>
-
-                    <p>
-                        <?= nl2br(htmlspecialchars($complaint["message"])) ?>
-                    </p>
-
-                </div>
-
-                <?php
-                    $status_class = match ($complaint["status"]) {
-                        "Resolved" => "resolved",
-                        "In Progress" => "in-progress",
-                        default => "pending"
-                    };
-                ?>
-
-                <p>
-                    <strong>Status:</strong>
+                        <h2><?= e($complaint["subject"]) ?></h2>
+                    </div>
 
                     <span class="status <?= $status_class ?>">
-                        <?= htmlspecialchars($complaint["status"]) ?>
+                        <?= e($complaint["status"]) ?>
                     </span>
+                </div>
+
+                <div class="client-info">
+                    <span><strong>Client:</strong> <?= e($complaint["client_name"]) ?></span>
+                    <span><?= e($complaint["client_email"]) ?></span>
+                    <span><?= e($complaint["client_phone"]) ?></span>
+                </div>
+
+                <div class="details">
+                    <strong>COMPLAINT DETAILS</strong>
+                    <p><?= nl2br(e($complaint["message"])) ?></p>
+                </div>
+
+                <p class="submitted-date">
+                    Submitted: <?= e($complaint["created_at"]) ?>
                 </p>
 
-                <p class="muted">
-                    Submitted:
-                    <?= htmlspecialchars($complaint["created_at"]) ?>
-                </p>
-
-                <form method="POST">
+                <form method="POST" class="response-form">
 
                     <input
                         type="hidden"
                         name="csrf_token"
-                        value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>"
+                        value="<?= e($_SESSION["csrf_token"]) ?>"
                     >
 
                     <input
                         type="hidden"
                         name="complaint_id"
-                        value="<?= (int) $complaint["id"] ?>"
+                        value="<?= (int)$complaint["id"] ?>"
                     >
 
-                    <label>Admin Response</label>
+                    <div class="form-group">
+                        <label>Admin Response</label>
 
-                    <textarea
-                        name="admin_response"
-                        maxlength="5000"
-                        placeholder="Write your response..."
-                    ><?= htmlspecialchars($complaint["admin_response"] ?? "") ?></textarea>
+                        <textarea
+                            name="admin_response"
+                            maxlength="5000"
+                            placeholder="Write your response to the client..."
+                        ><?= e($complaint["admin_response"] ?? "") ?></textarea>
+                    </div>
 
-                    <label>Complaint Status</label>
+                    <div class="form-group">
+                        <label>Complaint Status</label>
 
-                    <select name="status" required>
+                        <select name="status" required>
 
-                        <option value="Pending"
-                            <?= $complaint["status"] === "Pending" ? "selected" : "" ?>>
-                            Pending
-                        </option>
+                            <option value="Pending"
+                                <?= $complaint["status"] === "Pending" ? "selected" : "" ?>>
+                                Pending
+                            </option>
 
-                        <option value="In Progress"
-                            <?= $complaint["status"] === "In Progress" ? "selected" : "" ?>>
-                            In Progress
-                        </option>
+                            <option value="In Progress"
+                                <?= $complaint["status"] === "In Progress" ? "selected" : "" ?>>
+                                In Progress
+                            </option>
 
-                        <option value="Resolved"
-                            <?= $complaint["status"] === "Resolved" ? "selected" : "" ?>>
-                            Resolved
-                        </option>
+                            <option value="Resolved"
+                                <?= $complaint["status"] === "Resolved" ? "selected" : "" ?>>
+                                Resolved
+                            </option>
 
-                    </select>
+                        </select>
+                    </div>
 
-                    <br><br>
-
-                    <button type="submit">Update Complaint</button>
+                    <button type="submit" class="update-btn">
+                        Update Complaint
+                    </button>
 
                 </form>
 
@@ -543,13 +927,20 @@ $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
 
     <?php else: ?>
 
-        <section class="card">
-            <p class="muted">No complaints found.</p>
+        <section class="panel empty-state">
+            <h3>No Complaints Found</h3>
+            <p>There are no complaints matching your search or selected filter.</p>
         </section>
 
     <?php endif; ?>
 
 </main>
+
+<footer class="admin-footer">
+    &copy; <?= date("Y") ?> Smart Gym Management System
+</footer>
+
+</div>
 
 </body>
 </html>
